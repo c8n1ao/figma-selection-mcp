@@ -94,7 +94,7 @@ async function insertContextFileAndChat(
   );
 
   await vscode.env.clipboard.writeText(
-    `请参考 @${relativeMdPath} 实现这个 Figma 设计节点。`
+    `请参考 @${relativeMdPath} 实现这个 Figma 设计节点，并同时读取同目录下的 .node.json/.tokens.json/.children.json 文件。`
   );
   await vscode.commands.executeCommand('workbench.action.chat.open');
   await new Promise(r => setTimeout(r, 300));
@@ -132,7 +132,7 @@ async function insertFallbackToChat(
   );
 
   await vscode.env.clipboard.writeText(
-    `请参考 @${relativeMdPath} 实现这个 Figma 设计节点。`
+    `请参考 @${relativeMdPath} 实现这个 Figma 设计节点，并同时读取同目录下的 .node.json/.tokens.json/.children.json 文件。`
   );
   await vscode.commands.executeCommand('workbench.action.chat.open');
   await new Promise(r => setTimeout(r, 300));

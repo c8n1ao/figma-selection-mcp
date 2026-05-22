@@ -22,6 +22,9 @@ function formatNodeDetailed(node: FigmaNode): string {
   }
   if (node.visible === false) lines.push(`- 可见：否`);
   if (node.locked) lines.push(`- 锁定：是`);
+  if (node.boundVariables && Object.keys(node.boundVariables).length > 0) {
+    lines.push(`- 绑定变量：${Object.entries(node.boundVariables).map(([k, v]) => `${k}(${v.length})`).join(', ')}`);
+  }
 
   // 填充
   if (node.fillColor) {
@@ -281,8 +284,14 @@ export function registerLmTools(
             ),
           ]);
         }
+
+        const full = store.getFullMessage();
+        const raw = JSON.stringify(full ?? node, null, 2);
+        const cappedRaw = raw.length > 30000 ? `${raw.slice(0, 30000)}\n...\n/* JSON too long, truncated */` : raw;
+
         return new vscode.LanguageModelToolResult([
           new vscode.LanguageModelTextPart(formatNodeDetailed(node)),
+          new vscode.LanguageModelTextPart(`\n\n### 原始结构(JSON)\n\n\`\`\`json\n${cappedRaw}\n\`\`\``),
         ]);
       },
     }),

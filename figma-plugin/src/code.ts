@@ -20,6 +20,34 @@ function rounded(v: number, decimals = 2): number {
   return Math.round(v * m) / m;
 }
 
+function collectVariableIds(input: unknown, out: Set<string>): void {
+  if (!input) return;
+  if (typeof input === 'object' && input !== null) {
+    const obj = input as Record<string, unknown>;
+    if (typeof obj.id === 'string') {
+      out.add(obj.id);
+    }
+    for (const v of Object.values(obj)) {
+      collectVariableIds(v, out);
+    }
+  }
+}
+
+function extractNodeBoundVariables(node: SceneNode): Record<string, string[]> | undefined {
+  const raw = safeGet(() => (node as { boundVariables?: Record<string, unknown> }).boundVariables);
+  if (!raw || typeof raw !== 'object') return undefined;
+
+  const result: Record<string, string[]> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    const ids = new Set<string>();
+    collectVariableIds(value, ids);
+    if (ids.size > 0) {
+      result[key] = Array.from(ids);
+    }
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
 // ═══════════════════════════════════════════════════════════
 // 填充格式化
 // ═══════════════════════════════════════════════════════════
@@ -150,6 +178,11 @@ function extractNode(node: SceneNode, depth = 0): Record<string, unknown> {
     visible: node.visible !== false,
     locked: node.locked,
   };
+
+  const boundVariables = extractNodeBoundVariables(node);
+  if (boundVariables) {
+    base.boundVariables = boundVariables;
+  }
 
   // ── 父节点信息 ──
   const parent = node.parent;
@@ -599,7 +632,7 @@ function extractNode(node: SceneNode, depth = 0): Record<string, unknown> {
 
   if ('children' in node && (node as ChildrenMixin).children.length > 0) {
     const children = (node as ChildrenMixin).children;
-    const maxChildren = 50; // 最多递归提取 50 个直接子节点
+    const maxChildren = 120; // 最多递归提取 120 个直接子节点
 
     if (depth <= 1) {
       // depth 0 或 1：完整提取每个子节点，子节点的子节点只给摘要
@@ -688,6 +721,7 @@ figma.on('selectionchange', () => {
       name: n.name,
       type: n.type,
     })),
+    othersDetailed: selection.slice(1, 6).map(n => extractNode(n, 1)),
   };
   figma.ui.postMessage(payload);
 });

@@ -70,6 +70,7 @@ export interface FigmaNode {
   type: string;
   visible?: boolean;
   locked?: boolean;
+  boundVariables?: Record<string, string[]>;
 
   // 父节点
   parentId?: string;
@@ -230,6 +231,7 @@ export interface SelectionMessage {
   count: number;
   primary: FigmaNode | null;
   others: Array<{ id: string; name: string; type: string }>;
+  othersDetailed?: FigmaNode[];
 }
 
 /**

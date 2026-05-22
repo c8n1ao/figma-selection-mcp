@@ -20,8 +20,24 @@ interface WriteResult {
   mdPath: string;
   /** PNG 文件的绝对路径 */
   pngPath: string;
+  /** 节点原始 JSON 路径 */
+  nodeJsonPath: string;
+  /** Token 索引 JSON 路径 */
+  tokensJsonPath: string;
+  /** 子节点树 JSON 路径 */
+  childrenJsonPath: string;
+  /** 包清单路径 */
+  manifestPath: string;
   /** 相对于工作区根目录的 Markdown 路径（用于 @引用） */
   relativeMdPath: string;
+}
+
+interface TokenIndex {
+  colors: string[];
+  fonts: string[];
+  fontSizes: number[];
+  spacing: number[];
+  radii: number[];
 }
 
 export function writeContextToWorkspace(
@@ -46,14 +62,50 @@ export function writeContextToWorkspace(
     fs.writeFileSync(pngPath, pngBuffer);
   }
 
+  // ── 写入结构化 JSON（便于 Copilot 精确消费） ────────────────
+  const nodeJsonPath = path.join(contextDir, `${baseName}.node.json`);
+  fs.writeFileSync(nodeJsonPath, JSON.stringify(context.node, null, 2), 'utf8');
+
+  const childrenJsonPath = path.join(contextDir, `${baseName}.children.json`);
+  fs.writeFileSync(childrenJsonPath, JSON.stringify(context.node.children ?? [], null, 2), 'utf8');
+
+  const tokensJsonPath = path.join(contextDir, `${baseName}.tokens.json`);
+  fs.writeFileSync(tokensJsonPath, JSON.stringify(extractTokenIndex(context.node), null, 2), 'utf8');
+
+  const manifestPath = path.join(contextDir, `${baseName}.manifest.json`);
+  fs.writeFileSync(manifestPath, JSON.stringify({
+    schemaVersion: 1,
+    source: 'figma-selection-mcp',
+    generatedAt: new Date(timestamp).toISOString(),
+    node: {
+      id: context.node.id,
+      name: context.node.name,
+      type: context.node.type,
+      pageId: context.pageId,
+      pageName: context.pageName,
+      scale: context.scale,
+    },
+    files: {
+      markdown: `${baseName}.md`,
+      png: pngPath ? `${baseName}.png` : null,
+      nodeJson: `${baseName}.node.json`,
+      childrenJson: `${baseName}.children.json`,
+      tokensJson: `${baseName}.tokens.json`,
+    },
+  }, null, 2), 'utf8');
+
   // ── 生成 Markdown ───────────────────────────────────────
-  const mdContent = buildContextMarkdown(context, !!pngPath);
+  const mdContent = buildContextMarkdown(context, baseName, !!pngPath);
   const mdPath = path.join(contextDir, `${baseName}.md`);
   fs.writeFileSync(mdPath, mdContent, 'utf8');
 
   return {
     mdPath,
     pngPath,
+    nodeJsonPath,
+    tokensJsonPath,
+    childrenJsonPath,
+    manifestPath,
     relativeMdPath: `.figma-context/${baseName}.md`,
   };
 }
@@ -67,7 +119,7 @@ export function cleanOldContexts(workspaceDir: string): void {
 
   try {
     const files = fs.readdirSync(contextDir)
-      .filter(f => f.endsWith('.md') || f.endsWith('.png'))
+      .filter(f => f.endsWith('.md') || f.endsWith('.png') || f.endsWith('.json'))
       .map(f => ({
         name: f,
         time: fs.statSync(path.join(contextDir, f)).mtimeMs,
@@ -95,7 +147,7 @@ export function cleanOldContexts(workspaceDir: string): void {
 // Markdown 生成
 // ═══════════════════════════════════════════════════════════
 
-function buildContextMarkdown(ctx: ContextMessage, hasPng = false): string {
+function buildContextMarkdown(ctx: ContextMessage, baseName: string, hasPng = false): string {
   const node = ctx.node;
   const lines: string[] = [
     `# Figma 节点：${node.name}`,
@@ -109,12 +161,20 @@ function buildContextMarkdown(ctx: ContextMessage, hasPng = false): string {
   if (hasPng) {
     lines.push(`## 📸 截图`);
     lines.push(``);
-    lines.push(`![](${baseNameFromPath(ctx)}.png)`);
+    lines.push(`![](${baseName}.png)`);
     lines.push(``);
   } else {
     lines.push(`> ⚠️ 截图未生成（Figma 未连接或导出超时）。请确保 Figma Plugin 已启动后重试。`);
     lines.push(``);
   }
+
+  lines.push(`## 📦 文件包`);
+  lines.push(``);
+  lines.push(`- 节点原始结构: \`${baseName}.node.json\``);
+  lines.push(`- 子节点树: \`${baseName}.children.json\``);
+  lines.push(`- 设计 Token 索引: \`${baseName}.tokens.json\``);
+  lines.push(`- 包清单: \`${baseName}.manifest.json\``);
+  lines.push(``);
 
   // ── 尺寸与位置 ──
   lines.push(`## 📐 尺寸与位置`);
@@ -274,7 +334,7 @@ function buildContextMarkdown(ctx: ContextMessage, hasPng = false): string {
     lines.push(`## 👶 子元素`);
     lines.push(``);
     if (node.childrenTruncated) {
-      lines.push(`> ⚠️ 子元素过多（共 ${node.childrenTotal} 个），仅展示前 50 个。`);
+      lines.push(`> ⚠️ 子元素过多（共 ${node.childrenTotal} 个），仅展示前 120 个。`);
       lines.push(``);
     }
     lines.push(`| # | 名称 | 类型 | 尺寸 | 位置 | 信息 |`);
@@ -329,9 +389,56 @@ function buildContextMarkdown(ctx: ContextMessage, hasPng = false): string {
 // 辅助
 // ═══════════════════════════════════════════════════════════
 
-function baseNameFromPath(ctx: ContextMessage): string {
-  const safeName = ctx.nodeName.replace(/[^a-zA-Z0-9\u4e00-\u9fff\-_]/g, '_').slice(0, 40);
-  return `node-${safeName}-${ctx.timestamp}`;
+function extractTokenIndex(node: FigmaNode): TokenIndex {
+  const colors = new Set<string>();
+  const fonts = new Set<string>();
+  const fontSizes = new Set<number>();
+  const spacing = new Set<number>();
+  const radii = new Set<number>();
+
+  const walk = (n: FigmaNode): void => {
+    if (n.fillColor) colors.add(n.fillColor);
+    if (n.fills?.length) {
+      n.fills.forEach(p => {
+        if (p.color) colors.add(p.color);
+        if (p.gradientStops?.length) {
+          p.gradientStops.forEach(gs => colors.add(gs.color));
+        }
+      });
+    }
+    if (n.strokes?.length) {
+      n.strokes.forEach(s => {
+        if (s.color) colors.add(s.color);
+      });
+    }
+
+    if (n.fontName) fonts.add(`${n.fontName.family} ${n.fontName.style}`);
+    if (typeof n.fontSize === 'number') fontSizes.add(n.fontSize);
+
+    [n.paddingTop, n.paddingRight, n.paddingBottom, n.paddingLeft, n.itemSpacing, n.counterAxisSpacing]
+      .forEach(v => {
+        if (typeof v === 'number') spacing.add(v);
+      });
+
+    [n.cornerRadius, n.topLeftRadius, n.topRightRadius, n.bottomRightRadius, n.bottomLeftRadius]
+      .forEach(v => {
+        if (typeof v === 'number') radii.add(v);
+      });
+
+    if (n.children?.length) {
+      n.children.forEach(walk);
+    }
+  };
+
+  walk(node);
+
+  return {
+    colors: Array.from(colors),
+    fonts: Array.from(fonts),
+    fontSizes: Array.from(fontSizes).sort((a, b) => a - b),
+    spacing: Array.from(spacing).sort((a, b) => a - b),
+    radii: Array.from(radii).sort((a, b) => a - b),
+  };
 }
 
 function renderChildDetails(node: FigmaNode, depth: number): string {
