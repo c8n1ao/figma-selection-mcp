@@ -1,0 +1,20 @@
+{
+  "name": "figma-selection-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Figma Selection MCP — 将 Figma 选中节点实时同步到 VS Code Copilot",
+  "workspaces": [
+    "figma-plugin",
+    "vscode-extension"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "build:figma": "npm run build -w figma-plugin",
+    "build:extension": "npm run build -w vscode-extension",
+    "test": "npm run test -w vscode-extension",
+    "clean": "rm -rf figma-plugin/dist vscode-extension/dist"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

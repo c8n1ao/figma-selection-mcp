@@ -1,0 +1,115 @@
+{
+  "name": "figma-selection-mcp-ext",
+  "displayName": "Figma Selection MCP",
+  "version": "0.1.0",
+  "description": "将 Figma 选中节点的设计数据实时同步到 VS Code Copilot，实现 Design-to-Code 零摩擦",
+  "private": true,
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "figma-mcp.openInspector",
+        "title": "Figma: Open Design Inspector"
+      },
+      {
+        "command": "figma-mcp.insertToChat",
+        "title": "Figma: Insert Selection to Chat"
+      },
+      {
+        "command": "figma-mcp.testBridge",
+        "title": "Figma: Run Bridge Test"
+      }
+    ],
+    "chatParticipants": [
+      {
+        "id": "figma-mcp.figma",
+        "name": "figma",
+        "description": "访问 Figma 设计稿数据，获取当前选中节点信息、设计 Token、子元素结构",
+        "isSticky": false
+      }
+    ],
+    "languageModelTools": [
+      {
+        "name": "figma_get_selection",
+        "displayName": "获取 Figma 选中节点",
+        "modelDescription": "返回用户在 Figma 中当前选中的设计节点的完整属性，包括尺寸、颜色、字体、子元素、自动布局、圆角等。当用户提到 Figma 设计稿、UI 组件实现、设计还原、实现某个组件时自动调用。",
+        "tags": [
+          "figma",
+          "design",
+          "ui"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      {
+        "name": "figma_get_design_tokens",
+        "displayName": "提取 Figma 设计 Token",
+        "modelDescription": "从 Figma 选中节点提取设计 Token，包括颜色变量、字体规格、间距值，格式化为 CSS 变量、JSON 或 Tailwind 配置。当用户需要设计规范、颜色值、字体大小时使用。",
+        "tags": [
+          "figma",
+          "design",
+          "tokens"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "format": {
+              "type": "string",
+              "enum": [
+                "css",
+                "json",
+                "tailwind"
+              ],
+              "description": "输出格式：css=CSS 变量, json=JSON 对象, tailwind=Tailwind 配置"
+            }
+          }
+        }
+      },
+      {
+        "name": "figma_get_children",
+        "displayName": "获取 Figma 节点子元素",
+        "modelDescription": "获取当前选中 Figma 节点的所有子元素列表，用于了解组件层级结构。当用户需要了解组件内部结构时使用。",
+        "tags": [
+          "figma",
+          "design"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "nodeId": {
+              "type": "string",
+              "description": "节点 ID，不传时使用当前选中节点"
+            }
+          }
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "watch": "tsc -p tsconfig.json --watch",
+    "test": "npx ts-node -P test/tsconfig.json test/standalone-test.ts",
+    "test:mock": "npx ts-node -P test/tsconfig.json test/mock-figma-client.ts",
+    "start:bridge": "npx ts-node -P test/tsconfig.json -e \"const {BridgeServer}=require('./dist/bridgeServer');const {NodeStore}=require('./dist/nodeStore');const s=new NodeStore();const b=new BridgeServer(9877,s);b.start().then(()=>{console.log('BridgeServer ws://127.0.0.1:'+s.getPort());process.on('SIGINT',()=>{b.stop();process.exit(0)})})\"",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.96.0",
+    "@types/ws": "^8.5.13",
+    "@vscode/vsce": "^3.0.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.7.0"
+  }
+}

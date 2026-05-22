@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Figma Selection MCP — Bridge</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: Inter, system-ui, -apple-system, sans-serif;
+      font-size: 12px;
+      background: #1e1e1e;
+      color: #cccccc;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      padding: 12px;
+    }
+
+    .status-card {
+      text-align: center;
+    }
+
+    .dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+
+    .dot.connected {
+      background: #4caf50;
+    }
+
+    .dot.disconnected {
+      background: #f44336;
+    }
+
+    .dot.connecting {
+      background: #ff9800;
+      animation: pulse 1s infinite;
+    }
+
+    @keyframes pulse {
+
+      0%,
+      100% {
+        opacity: 1;
+      }
+
+      50% {
+        opacity: 0.3;
+      }
+    }
+
+    #status {
+      font-weight: 600;
+      margin-top: 4px;
+    }
+
+    #info {
+      color: #888;
+      margin-top: 2px;
+      font-size: 10px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="status-card">
+    <div>
+      <span id="dot" class="dot disconnected"></span>
+      <span id="status">Disconnected</span>
+    </div>
+    <div id="info">Waiting for VS Code…</div>
+  </div>
+
+  <script>
+    const WS_BASE_PORT = 9877;
+    const WS_MAX_PORT = 9887;
+
+    let ws = null;
+    let reconnectTimer = null;
+    let pendingMessages = [];
+    let currentPort = WS_BASE_PORT;
+
+    function setState (state) {
+      const dot = document.getElementById('dot');
+      const status = document.getElementById('status');
+      const info = document.getElementById('info');
+      dot.className = 'dot';
+      switch (state) {
+        case 'connected':
+          dot.classList.add('connected');
+          status.textContent = 'Connected';
+          info.textContent = 'VS Code bridge active on port ' + currentPort;
+          break;
+        case 'disconnected':
+          dot.classList.add('disconnected');
+          status.textContent = 'Disconnected';
+          info.textContent = 'Retrying connection…';
+          break;
+        case 'connecting':
+          dot.classList.add('connecting');
+          status.textContent = 'Connecting…';
+          info.textContent = 'Trying port ' + currentPort;
+          break;
+      }
+    }
+
+    function connect (port) {
+      if (ws) {
+        try { ws.close(); } catch (_) { }
+        ws = null;
+      }
+      currentPort = port;
+      setState('connecting');
+      ws = new WebSocket('ws://127.0.0.1:' + port);
+
+      ws.onopen = function () {
+        setState('connected');
+        // 发送积压消息
+        var msgs = pendingMessages;
+        pendingMessages = [];
+        msgs.forEach(function (m) {
+          if (ws && ws.readyState === WebSocket.OPEN) ws.send(m);
+        });
+      };
+
+      ws.onmessage = function (event) {
+        // 将 VS Code 发来的消息转发给 Figma Plugin 主逻辑 (code.ts)
+        try {
+          var msg = JSON.parse(event.data);
+          parent.postMessage({ pluginMessage: msg }, '*');
+        } catch (e) {
+          // 非 JSON 消息忽略
+        }
+      };
+
+      ws.onclose = function () {
+        if (reconnectTimer) return; // 已经安排了重连
+        setState('disconnected');
+        ws = null;
+        scheduleReconnect();
+      };
+
+      ws.onerror = function () {
+        // 尝试下一个端口
+        if (currentPort < WS_MAX_PORT) {
+          connect(currentPort + 1);
+        }
+      };
+    }
+
+    function scheduleReconnect () {
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(function () {
+        reconnectTimer = null;
+        connect(WS_BASE_PORT);
+      }, 5000);
+    }
+
+    // 接收 code.ts 的消息
+    window.onmessage = function (event) {
+      var msg = event.data.pluginMessage;
+      if (!msg) return;
+
+      var serialized = JSON.stringify(msg);
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(serialized);
+      } else {
+        pendingMessages.push(serialized);
+        if (pendingMessages.length > 100) pendingMessages.shift();
+      }
+    };
+
+    // 启动连接
+    connect(WS_BASE_PORT);
+  </script>
+</body>
+
+</html>
